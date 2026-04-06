@@ -1,3 +1,7 @@
+import os
+import uuid
+from datetime import datetime
+
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
@@ -7,8 +11,6 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-
-import os
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
@@ -30,10 +32,14 @@ ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
     PHOTOS,
     VIDEO,
     CONFIRM,
-) = range(16)
+    REMOVE_POST_LINK,
+    REMOVE_SUBMISSION_CODE,
+    REMOVE_CONFIRM,
+) = range(19)
 
 MENU_KEYBOARD = [
     ["Submit Marketplace Item"],
+    ["Remove Sale Post"],
     ["How It Works", "Contact Admin"],
 ]
 
@@ -51,6 +57,12 @@ def safe_text(value):
         return "None"
     value = str(value).strip()
     return value if value else "None"
+
+
+def generate_submission_code():
+    date_part = datetime.utcnow().strftime("%Y%m%d")
+    short_part = uuid.uuid4().hex[:6].upper()
+    return "WLJ-{}-{}".format(date_part, short_part)
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text=None) -> int:
@@ -78,15 +90,22 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if choice == "Submit Marketplace Item":
         return await start_submission(update, context)
 
+    if choice == "Remove Sale Post":
+        return await start_remove_sale_post(update, context)
+
     if choice == "How It Works":
         await update.message.reply_text(
-            "WLJ Marketplace Submission Flow:\n\n"
-            "1. Choose 'Submit Marketplace Item'\n"
-            "2. Answer the listing questions\n"
-            "3. Upload up to 5 photos\n"
-            "4. Optionally upload 1 video\n"
-            "5. Confirm your submission\n"
-            "6. The admin team will receive it for review\n"
+            "WLJ Marketplace Options:\n\n"
+            "1. Submit Marketplace Item\n"
+            "   - Answer the listing questions\n"
+            "   - Upload up to 5 photos\n"
+            "   - Optionally upload 1 video\n"
+            "   - Confirm your submission\n"
+            "   - Receive your unique submission code\n\n"
+            "2. Remove Sale Post\n"
+            "   - Submit your Telegram post link\n"
+            "   - Submit your marketplace submission code\n"
+            "   - Admin will review your removal request"
         )
         return await show_main_menu(
             update,
@@ -111,6 +130,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def start_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     context.user_data["photos"] = []
+    context.user_data["submission_code"] = generate_submission_code()
 
     await update.message.reply_text(
         "Great! I’ll ask you a few questions and send your submission to the admin team for review.\n\n"
@@ -206,7 +226,7 @@ async def dealing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["dealing"] = update.message.text.strip()
     await update.message.reply_text(
         "Now send up to 5 photos of the item.\n"
-        "Send them one by one. There will be some delays. Please do not rush.\n\n"
+        "Send them one by one. There may be some delays, so please do not rush.\n\n"
         "When finished, send /done"
     )
     return PHOTOS
@@ -259,7 +279,7 @@ async def skip_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["video"] = None
     await update.message.reply_text(
         "Final confirmation:\n"
-        "Do you confirm this piece was purchased from WLJ and all details provided are honest and complete? Type Yes or No.",
+        "Do you confirm this piece was purchased from WLJ and all details provided are honest and complete?",
         reply_markup=yes_no_markup(),
     )
     return CONFIRM
@@ -272,10 +292,11 @@ async def send_submission_to_admin(
 
     details = (
         "New WLJ Marketplace Submission\n\n"
+        "Submission Code: {}\n"
         "Submitted by Telegram user: {}\n"
         "User ID: {}\n\n"
         "Name: {}\n"
-        "Instagram: {}\n"
+        "Instagram / Purchase Verification: {}\n"
         "Telegram Handle: {}\n"
         "Item Title: {}\n"
         "Piece Type: {}\n"
@@ -288,6 +309,7 @@ async def send_submission_to_admin(
         "Dealing: {}\n"
         "Confirmed: Yes"
     ).format(
+        safe_text(data.get("submission_code")),
         submitted_by,
         user_id,
         safe_text(data.get("your_name")),
@@ -311,14 +333,20 @@ async def send_submission_to_admin(
         await context.bot.send_photo(
             chat_id=ADMIN_CHAT_ID,
             photo=file_id,
-            caption="Submission photo {}/{}".format(idx, len(photos)),
+            caption="Submission Code: {}\nSubmission photo {}/{}".format(
+                safe_text(data.get("submission_code")),
+                idx,
+                len(photos),
+            ),
         )
 
     if data.get("video"):
         await context.bot.send_video(
             chat_id=ADMIN_CHAT_ID,
             video=data["video"],
-            caption="Submission video",
+            caption="Submission Code: {}\nSubmission video".format(
+                safe_text(data.get("submission_code"))
+            ),
         )
 
 
@@ -347,12 +375,16 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             user_id=user.id,
             username=user.username,
         )
+        submission_code = safe_text(data.get("submission_code"))
         context.user_data.clear()
         return await show_main_menu(
             update,
             context,
             "Thank you. Your submission has been sent to the WLJ admin team for review.\n\n"
-            "You’re back at the main menu.",
+            "Your marketplace submission code is:\n"
+            "{}\n\n"
+            "Please keep this code safe. You will need it if you want to request removal of your sale post later.\n\n"
+            "You’re back at the main menu.".format(submission_code),
         )
     except Exception as e:
         print("ERROR SENDING TO ADMIN CHAT:", e)
@@ -365,12 +397,104 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         )
 
 
+async def start_remove_sale_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
+    await update.message.reply_text(
+        "You chose Remove Sale Post.\n\n"
+        "Please send the Telegram post link of the sale post you want removed.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return REMOVE_POST_LINK
+
+
+async def remove_post_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data["remove_post_link"] = update.message.text.strip()
+    await update.message.reply_text(
+        "Please send your marketplace submission code."
+    )
+    return REMOVE_SUBMISSION_CODE
+
+
+async def remove_submission_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data["remove_submission_code"] = update.message.text.strip()
+    await update.message.reply_text(
+        "Final confirmation:\n"
+        "Do you want WLJ admin to remove this sale post?",
+        reply_markup=yes_no_markup(),
+    )
+    return REMOVE_CONFIRM
+
+
+async def send_remove_request_to_admin(
+    context: ContextTypes.DEFAULT_TYPE, data: dict, user_id: int, username
+) -> None:
+    requested_by = "@{}".format(username) if username else "(no username)"
+
+    details = (
+        "WLJ Remove Sale Post Request\n\n"
+        "Requested by Telegram user: {}\n"
+        "User ID: {}\n\n"
+        "Telegram Post Link: {}\n"
+        "Marketplace Submission Code: {}"
+    ).format(
+        requested_by,
+        user_id,
+        safe_text(data.get("remove_post_link")),
+        safe_text(data.get("remove_submission_code")),
+    )
+
+    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=details)
+
+
+async def remove_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    answer = update.message.text.strip().lower()
+
+    if answer not in ["yes", "no"]:
+        await update.message.reply_text("Please reply with Yes or No.")
+        return REMOVE_CONFIRM
+
+    if answer == "no":
+        context.user_data.clear()
+        return await show_main_menu(
+            update,
+            context,
+            "Remove sale post request cancelled. You’re back at the main menu.",
+        )
+
+    user = update.effective_user
+    data = dict(context.user_data)
+
+    try:
+        await send_remove_request_to_admin(
+            context=context,
+            data=data,
+            user_id=user.id,
+            username=user.username,
+        )
+        context.user_data.clear()
+        return await show_main_menu(
+            update,
+            context,
+            "Your remove sale post request has been sent to the WLJ admin team.\n\n"
+            "You’re back at the main menu.",
+        )
+    except Exception as e:
+        print("ERROR SENDING REMOVE REQUEST TO ADMIN CHAT:", e)
+        context.user_data.clear()
+        return await show_main_menu(
+            update,
+            context,
+            "I collected your remove request, but I could not send it to the admin chat.\n\n"
+            "Please try again from the menu.",
+        )
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     return await show_main_menu(
         update,
         context,
-        "Submission cancelled. You’re back at the main menu.",
+        "Action cancelled. You’re back at the main menu.",
     )
 
 
@@ -393,6 +517,7 @@ def main() -> None:
         entry_points=[
             CommandHandler("start", start),
             CommandHandler("submit", start_submission),
+            CommandHandler("remove", start_remove_sale_post),
         ],
         states={
             MENU: [
@@ -434,6 +559,15 @@ def main() -> None:
             ],
             CONFIRM: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, confirm),
+            ],
+            REMOVE_POST_LINK: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, remove_post_link),
+            ],
+            REMOVE_SUBMISSION_CODE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, remove_submission_code),
+            ],
+            REMOVE_CONFIRM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, remove_confirm),
             ],
         },
         fallbacks=[
