@@ -123,7 +123,7 @@ async def start_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def your_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["your_name"] = update.message.text.strip()
     await update.message.reply_text(
-        "What is your Instagram handle? If not submitted, this post will not be approved."
+        "To verify that the item was purchased from WLJ, please provide either your Instagram/Tiktok handle or the item purchase code. If not submitted, this post will not be approved."
     )
     return INSTAGRAM
 
@@ -131,7 +131,7 @@ async def your_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def instagram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["instagram"] = update.message.text.strip()
     await update.message.reply_text(
-        "What is your Telegram handle? If not submitted, this post will not be approved."
+        "Please indicate your Telegram handle for the buyer to reach out to you. If not submitted, this post will not be approved."
     )
     return TELEGRAM_HANDLE
 
