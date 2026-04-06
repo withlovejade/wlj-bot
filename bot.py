@@ -10,8 +10,8 @@ from telegram.ext import (
 
 import os
 
-BOT_TOKEN = os.environ["011279327:AAEQrsIo8tfVlf1foZ-a8jYWwufjYrJbv_4"]
-ADMIN_CHAT_ID = int(os.environ["-1003867259809"])
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
 
 (
     MENU,
